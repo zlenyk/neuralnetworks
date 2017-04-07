@@ -77,8 +77,8 @@ test_set = get_cifar_data('cifar/test_batch')
 
 learning_rate = 0.001
 display_step = 1
-batch_size = 32
-num_epochs = 50
+batch_size = 128
+num_epochs = 30
 input_size = 3072
 classes = 10
 
@@ -114,11 +114,16 @@ def build_layers(layers):
             current_shape[1] = current_shape[1]//2
             current_shape[2] = current_shape[2]//2
         elif layer['name'] == NORM:
-            layer_dict['mean'] = tf.Variable(tf.random_normal([1]))
-            layer_dict['var'] = tf.Variable(tf.random_normal([1])) + 1
+            layer_dict['mean'] = tf.Variable(tf.random_normal([current_shape[0]]))
+            layer_dict['var'] = tf.Variable(tf.random_normal([current_shape[0]]))+1
         # in case of dropout or relu change nothing
         model_layers.append(layer_dict)
     return model_layers
+
+
+def normalize_batch(X, gamma, beta):
+    mean, var = tf.nn.moments(X, axes=[0,1,2], keep_dims=False)
+    return tf.nn.batch_normalization(X, mean, var, beta, gamma, 1e-5)
 
 def model(X, layers):
     temp = []
@@ -135,8 +140,7 @@ def model(X, layers):
         elif layer['name'] == RELU:
             X = tf.nn.relu(X)
         elif layer['name'] == NORM:
-            mean, var = tf.nn.moments(X,[0], keep_dims=True)
-            X = tf.nn.batch_normalization(X, mean, var, layer['mean'], layer['var'], 1e-5)
+            normalize_batch(X, layer['var'], layer['mean'])
         elif layer['name'] == RES_BEG:
             temp = X
         elif layer['name'] == RES_END:
@@ -144,13 +148,7 @@ def model(X, layers):
     return X
 
 layers = [
-    #{'name':DROPOUT},
-    {'name':CONV, 'shape':[3,3,16]},#32
-    {'name':NORM},
-    {'name':RELU},
-
-    {'name':POOL},
-
+    {'name':DROPOUT},
     {'name':CONV, 'shape':[3,3,32]},#32
     {'name':NORM},
     {'name':RELU},
@@ -169,9 +167,65 @@ layers = [
 
     {'name':POOL},
 
-    {'name':CONV, 'shape':[3,3,32]},#32
+    {'name':DROPOUT},
+    {'name':CONV, 'shape':[3,3,64]},#32
     {'name':NORM},
     {'name':RELU},
+
+    {'name':RES_BEG},
+    {'name':CONV, 'shape':[3,3,64]},#32
+    {'name':NORM},
+    {'name':RELU},
+    {'name':RES_END},
+
+    {'name':RES_BEG},
+    {'name':CONV, 'shape':[3,3,64]},#32
+    {'name':NORM},
+    {'name':RELU},
+    {'name':RES_END},
+
+    {'name':RES_BEG},
+    {'name':CONV, 'shape':[3,3,64]},#32
+    {'name':NORM},
+    {'name':RELU},
+    {'name':RES_END},
+
+    {'name':RES_BEG},
+    {'name':CONV, 'shape':[3,3,64]},#32
+    {'name':NORM},
+    {'name':RELU},
+    {'name':RES_END},
+
+    {'name':POOL},
+
+    {'name':DROPOUT},
+    {'name':CONV, 'shape':[3,3,64]},#32
+    {'name':NORM},
+    {'name':RELU},
+
+    {'name':RES_BEG},
+    {'name':CONV, 'shape':[3,3,64]},#32
+    {'name':NORM},
+    {'name':RELU},
+    {'name':RES_END},
+
+    {'name':RES_BEG},
+    {'name':CONV, 'shape':[3,3,64]},#32
+    {'name':NORM},
+    {'name':RELU},
+    {'name':RES_END},
+
+    {'name':RES_BEG},
+    {'name':CONV, 'shape':[3,3,64]},#32
+    {'name':NORM},
+    {'name':RELU},
+    {'name':RES_END},
+
+    {'name':RES_BEG},
+    {'name':CONV, 'shape':[3,3,64]},#32
+    {'name':NORM},
+    {'name':RELU},
+    {'name':RES_END},
 
     {'name':POOL},
 
@@ -182,6 +236,7 @@ layer_model = model(x, build_layers(layers))
 
 cost = tf.reduce_mean(
     tf.nn.softmax_cross_entropy_with_logits(logits=layer_model, labels=y))
+
 optimizer = tf.train.AdamOptimizer(learning_rate).minimize(cost)
 
 sess = tf.InteractiveSession()
@@ -196,7 +251,7 @@ for epoch in range(num_epochs):
         batch_labels = train_labels[i*batch_size:(i+1)*batch_size]
         _, c = sess.run([optimizer, cost], feed_dict={x: batch_images,
                                                       y: batch_labels,
-                                                      keep_probs: 0.7})
+                                                      keep_probs: 1.0})
         # Compute average loss
         avg_cost += c / total_batch
     # Display logs per epoch step
