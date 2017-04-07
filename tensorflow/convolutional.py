@@ -92,6 +92,8 @@ FC = 'FC'
 DROPOUT = 'DROPOUT'
 RELU = 'RELU'
 NORM = 'NORM'
+RES_BEG = 'RES_BEG'
+RES_END = 'RES_END'
 
 def build_layers(layers):
     model_layers = []
@@ -119,6 +121,7 @@ def build_layers(layers):
     return model_layers
 
 def model(X, layers):
+    temp = []
     for layer in layers:
         if layer['name'] == CONV:
             X = conv2d(X, layer['W']) + layer['b']
@@ -134,45 +137,43 @@ def model(X, layers):
         elif layer['name'] == NORM:
             mean, var = tf.nn.moments(X,[0], keep_dims=True)
             X = tf.nn.batch_normalization(X, mean, var, layer['mean'], layer['var'], 1e-5)
+        elif layer['name'] == RES_BEG:
+            temp = X
+        elif layer['name'] == RES_END:
+            X = X + temp
     return X
 
 layers = [
-    {'name':DROPOUT},
-    {'name':CONV, 'shape':[5,5,32]},#32
-    {'name':NORM},
-    {'name':RELU},
-
-    {'name':CONV, 'shape':[5,5,32]},#32
+    #{'name':DROPOUT},
+    {'name':CONV, 'shape':[3,3,16]},#32
     {'name':NORM},
     {'name':RELU},
 
     {'name':POOL},
 
-    {'name':CONV, 'shape':[5,5,16]},#32
+    {'name':CONV, 'shape':[3,3,32]},#32
     {'name':NORM},
     {'name':RELU},
 
-    {'name':CONV, 'shape':[5,5,16]},#32
+    {'name':RES_BEG},
+    {'name':CONV, 'shape':[3,3,32]},#32
     {'name':NORM},
     {'name':RELU},
+    {'name':RES_END},
 
-    {'name':POOL},#16
-
-    {'name':CONV, 'shape':[5,5,16]},
+    {'name':RES_BEG},
+    {'name':CONV, 'shape':[3,3,32]},#32
     {'name':NORM},
     {'name':RELU},
+    {'name':RES_END},
 
+    {'name':POOL},
 
-    {'name':CONV, 'shape':[5,5,16]},
+    {'name':CONV, 'shape':[3,3,32]},#32
     {'name':NORM},
     {'name':RELU},
 
     {'name':POOL},
-
-    {'name':FC, 'shape':[64]},
-    {'name':NORM},
-    {'name':RELU},
-    {'name':DROPOUT},
 
     {'name':FC, 'shape':[10]}
 ]
