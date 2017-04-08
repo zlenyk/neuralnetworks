@@ -64,6 +64,23 @@ def conv2d(x, W):
 def max_pool_2x2(x):
     return tf.nn.max_pool(x, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='SAME')
 
+def normalize_batch(X, gamma, beta):
+    mean, var = tf.nn.moments(X, axes=[0,1,2], keep_dims=False)
+    return tf.nn.batch_normalization(X, mean, var, beta, gamma, 1e-5)
+
+def crop(images, c1, c2):
+    images = np.delete(images, range(c1), axis=1)
+    images = np.delete(images, range(images.shape[1]-8+c1,images.shape[1]), axis=1)
+    images = np.delete(images, range(c2), axis=2)
+    images = np.delete(images, range(images.shape[2]-8+c2,images.shape[2]), axis=2)
+    return images
+
+def crop_images(images):
+    return crop(images, np.random.randint(0,8), np.random.randint(0,8))
+
+def crop_centrally(images):
+    return crop(images, 4, 4)
+
 #mnist = input_data.read_data_sets("MNIST_data/", one_hot=True)
 (train_images, train_labels) = get_cifar_data('cifar/data_batch_1')
 for i in range(2,6):
@@ -77,12 +94,12 @@ test_set = get_cifar_data('cifar/test_batch')
 
 learning_rate = 0.001
 display_step = 1
-batch_size = 128
-num_epochs = 30
+batch_size = 32
+num_epochs = 100
 input_size = 3072
 classes = 10
 
-x = tf.placeholder(tf.float32, [None, 32,32,3])
+x = tf.placeholder(tf.float32, [None, 24,24,3])
 y = tf.placeholder(tf.float32, [None, classes])
 keep_probs = tf.placeholder(tf.float32)
 
@@ -97,7 +114,7 @@ RES_END = 'RES_END'
 
 def build_layers(layers):
     model_layers = []
-    current_shape = [3,32,32]
+    current_shape = [3,24,24]
     for layer in layers:
         layer_dict = {}
         layer_dict['name'] = layer['name']
@@ -120,11 +137,6 @@ def build_layers(layers):
         model_layers.append(layer_dict)
     return model_layers
 
-
-def normalize_batch(X, gamma, beta):
-    mean, var = tf.nn.moments(X, axes=[0,1,2], keep_dims=False)
-    return tf.nn.batch_normalization(X, mean, var, beta, gamma, 1e-5)
-
 def model(X, layers):
     temp = []
     for layer in layers:
@@ -140,7 +152,7 @@ def model(X, layers):
         elif layer['name'] == RELU:
             X = tf.nn.relu(X)
         elif layer['name'] == NORM:
-            normalize_batch(X, layer['var'], layer['mean'])
+            X = normalize_batch(X, layer['var'], layer['mean'])
         elif layer['name'] == RES_BEG:
             temp = X
         elif layer['name'] == RES_END:
@@ -149,86 +161,106 @@ def model(X, layers):
 
 layers = [
     {'name':DROPOUT},
-    {'name':CONV, 'shape':[3,3,32]},#32
     {'name':NORM},
-    {'name':RELU},
+
+    {'name':CONV, 'shape':[3,3,32]},#32
 
     {'name':RES_BEG},
-    {'name':CONV, 'shape':[3,3,32]},#32
-    {'name':NORM},
-    {'name':RELU},
-    {'name':RES_END},
-
-    {'name':RES_BEG},
-    {'name':CONV, 'shape':[3,3,32]},#32
-    {'name':NORM},
-    {'name':RELU},
-    {'name':RES_END},
-
-    {'name':POOL},
-
     {'name':DROPOUT},
-    {'name':CONV, 'shape':[3,3,64]},#32
     {'name':NORM},
     {'name':RELU},
-
-    {'name':RES_BEG},
-    {'name':CONV, 'shape':[3,3,64]},#32
+    {'name':CONV, 'shape':[3,3,32]},#16
     {'name':NORM},
     {'name':RELU},
-    {'name':RES_END},
-
-    {'name':RES_BEG},
-    {'name':CONV, 'shape':[3,3,64]},#32
-    {'name':NORM},
-    {'name':RELU},
-    {'name':RES_END},
-
-    {'name':RES_BEG},
-    {'name':CONV, 'shape':[3,3,64]},#32
-    {'name':NORM},
-    {'name':RELU},
-    {'name':RES_END},
-
-    {'name':RES_BEG},
-    {'name':CONV, 'shape':[3,3,64]},#32
-    {'name':NORM},
-    {'name':RELU},
+    {'name':CONV, 'shape':[3,3,32]},#16
     {'name':RES_END},
 
     {'name':POOL},
 
+    {'name':RES_BEG},
     {'name':DROPOUT},
-    {'name':CONV, 'shape':[3,3,64]},#32
     {'name':NORM},
     {'name':RELU},
-
-    {'name':RES_BEG},
-    {'name':CONV, 'shape':[3,3,64]},#32
+    {'name':CONV, 'shape':[3,3,32]},#16
     {'name':NORM},
     {'name':RELU},
+    {'name':CONV, 'shape':[3,3,32]},#16
     {'name':RES_END},
 
     {'name':RES_BEG},
-    {'name':CONV, 'shape':[3,3,64]},#32
+    {'name':DROPOUT},
     {'name':NORM},
     {'name':RELU},
+    {'name':CONV, 'shape':[3,3,32]},#16
+    {'name':NORM},
+    {'name':RELU},
+    {'name':CONV, 'shape':[3,3,32]},#16
     {'name':RES_END},
 
     {'name':RES_BEG},
-    {'name':CONV, 'shape':[3,3,64]},#32
+    {'name':DROPOUT},
     {'name':NORM},
     {'name':RELU},
-    {'name':RES_END},
-
-    {'name':RES_BEG},
-    {'name':CONV, 'shape':[3,3,64]},#32
+    {'name':CONV, 'shape':[3,3,32]},#16
     {'name':NORM},
     {'name':RELU},
+    {'name':CONV, 'shape':[3,3,32]},#16
     {'name':RES_END},
 
     {'name':POOL},
 
+    {'name':NORM},
+    {'name':RELU},
+    {'name':CONV, 'shape':[3,3,64]},
+
+    {'name':RES_BEG},
+    {'name':DROPOUT},
+    {'name':NORM},
+    {'name':RELU},
+    {'name':CONV, 'shape':[3,3,64]},#16
+    {'name':NORM},
+    {'name':RELU},
+    {'name':CONV, 'shape':[3,3,64]},#16
+    {'name':RES_END},
+
+    {'name':RES_BEG},
+    {'name':DROPOUT},
+    {'name':NORM},
+    {'name':RELU},
+    {'name':CONV, 'shape':[3,3,64]},#16
+    {'name':NORM},
+    {'name':RELU},
+    {'name':CONV, 'shape':[3,3,64]},#16
+    {'name':RES_END},
+
+    {'name':RES_BEG},
+    {'name':DROPOUT},
+    {'name':NORM},
+    {'name':RELU},
+    {'name':CONV, 'shape':[3,3,64]},#16
+    {'name':NORM},
+    {'name':RELU},
+    {'name':CONV, 'shape':[3,3,64]},#16
+    {'name':RES_END},
+
+    {'name':RES_BEG},
+    {'name':DROPOUT},
+    {'name':NORM},
+    {'name':RELU},
+    {'name':CONV, 'shape':[3,3,64]},#16
+    {'name':NORM},
+    {'name':RELU},
+    {'name':CONV, 'shape':[3,3,64]},#16
+    {'name':RES_END},
+
+    {'name':POOL},
+
+    {'name':NORM},
+    {'name':RELU},
+    {'name':CONV, 'shape':[3,3,128]},#16
+
+    {'name':NORM},
+    {'name':RELU},
     {'name':FC, 'shape':[10]}
 ]
 
@@ -248,6 +280,7 @@ for epoch in range(num_epochs):
     shuffle_in_unison(train_images, train_labels)
     for i in tqdm(range(total_batch)):
         batch_images = train_images[i*batch_size:(i+1)*batch_size]
+        batch_images = crop_images(batch_images)
         batch_labels = train_labels[i*batch_size:(i+1)*batch_size]
         _, c = sess.run([optimizer, cost], feed_dict={x: batch_images,
                                                       y: batch_labels,
@@ -259,9 +292,11 @@ for epoch in range(num_epochs):
         predict = tf.equal(tf.argmax(layer_model, 1), tf.argmax(y, 1))
         accuracy = tf.reduce_mean(tf.cast(predict, "float"))
         test_batch_size = 100
+        test_images, test_labels = test_set
+        test_images = crop_centrally(test_images)
         acc = []
         for i in range(len(test_set[0])//test_batch_size):
-            acc.append(accuracy.eval({x: test_set[0][i*test_batch_size:(i+1)*test_batch_size], y: test_set[1][i*test_batch_size:(i+1)*test_batch_size], keep_probs: 1.0}))
+            acc.append(accuracy.eval({x: test_images[i*test_batch_size:(i+1)*test_batch_size], y: test_labels[i*test_batch_size:(i+1)*test_batch_size], keep_probs: 1.0}))
         acc = np.average(acc)
         print("Epoch:", '%04d' % (epoch+1), "cost=", \
             "{:.9f}".format(avg_cost), "Accuracy:", acc)
