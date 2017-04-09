@@ -14,6 +14,13 @@ def unpickle(file):
     fo.close()
     return dict
 
+def get_labels():
+    labels = unpickle('cifar/batches.meta')
+    names = []
+    for label in labels[b'label_names']:
+        names.append(label.decode('UTF-8'))
+    return names
+
 def _convert_images(raw):
     raw_float = np.array(raw, dtype=float) / 255.0
     images = raw_float.reshape([-1, 3, 32, 32])
@@ -166,7 +173,6 @@ layers = [
     {'name':CONV, 'shape':[3,3,32]},#32
 
     {'name':RES_BEG},
-    {'name':DROPOUT},
     {'name':NORM},
     {'name':RELU},
     {'name':CONV, 'shape':[3,3,32]},#16
@@ -178,7 +184,6 @@ layers = [
     {'name':POOL},
 
     {'name':RES_BEG},
-    {'name':DROPOUT},
     {'name':NORM},
     {'name':RELU},
     {'name':CONV, 'shape':[3,3,32]},#16
@@ -188,7 +193,6 @@ layers = [
     {'name':RES_END},
 
     {'name':RES_BEG},
-    {'name':DROPOUT},
     {'name':NORM},
     {'name':RELU},
     {'name':CONV, 'shape':[3,3,32]},#16
@@ -198,7 +202,6 @@ layers = [
     {'name':RES_END},
 
     {'name':RES_BEG},
-    {'name':DROPOUT},
     {'name':NORM},
     {'name':RELU},
     {'name':CONV, 'shape':[3,3,32]},#16
@@ -214,7 +217,6 @@ layers = [
     {'name':CONV, 'shape':[3,3,64]},
 
     {'name':RES_BEG},
-    {'name':DROPOUT},
     {'name':NORM},
     {'name':RELU},
     {'name':CONV, 'shape':[3,3,64]},#16
@@ -224,7 +226,6 @@ layers = [
     {'name':RES_END},
 
     {'name':RES_BEG},
-    {'name':DROPOUT},
     {'name':NORM},
     {'name':RELU},
     {'name':CONV, 'shape':[3,3,64]},#16
@@ -234,7 +235,6 @@ layers = [
     {'name':RES_END},
 
     {'name':RES_BEG},
-    {'name':DROPOUT},
     {'name':NORM},
     {'name':RELU},
     {'name':CONV, 'shape':[3,3,64]},#16
@@ -244,7 +244,6 @@ layers = [
     {'name':RES_END},
 
     {'name':RES_BEG},
-    {'name':DROPOUT},
     {'name':NORM},
     {'name':RELU},
     {'name':CONV, 'shape':[3,3,64]},#16
@@ -259,11 +258,29 @@ layers = [
     {'name':RELU},
     {'name':CONV, 'shape':[3,3,128]},#16
 
+    {'name':RES_BEG},
+    {'name':NORM},
+    {'name':RELU},
+    {'name':CONV, 'shape':[3,3,128]},#16
+    {'name':RES_END},
+
     {'name':NORM},
     {'name':RELU},
     {'name':FC, 'shape':[10]}
 ]
 
+test_layers = [
+    {'name':DROPOUT},
+    {'name':NORM},
+    {'name':POOL},
+
+    {'name':CONV, 'shape':[3,3,2]},#32
+    {'name':NORM},
+    {'name':RELU},
+    {'name':POOL},
+    {'name':POOL},
+    {'name':FC, 'shape':[10]}
+]
 layer_model = model(x, build_layers(layers))
 
 cost = tf.reduce_mean(
@@ -287,18 +304,41 @@ for epoch in range(num_epochs):
                                                       keep_probs: 1.0})
         # Compute average loss
         avg_cost += c / total_batch
-    # Display logs per epoch step
+
     if epoch % display_step == 0:
-        predict = tf.equal(tf.argmax(layer_model, 1), tf.argmax(y, 1))
-        accuracy = tf.reduce_mean(tf.cast(predict, "float"))
         test_batch_size = 100
         test_images, test_labels = test_set
         test_images = crop_centrally(test_images)
-        acc = []
-        for i in range(len(test_set[0])//test_batch_size):
-            acc.append(accuracy.eval({x: test_images[i*test_batch_size:(i+1)*test_batch_size], y: test_labels[i*test_batch_size:(i+1)*test_batch_size], keep_probs: 1.0}))
-        acc = np.average(acc)
-        print("Epoch:", '%04d' % (epoch+1), "cost=", \
-            "{:.9f}".format(avg_cost), "Accuracy:", acc)
+
+        evaluate_model = tf.argmax(layer_model, 1)
+        predicted_labels = []
+        for i in range(len(test_images)//test_batch_size):
+            new_labels = evaluate_model.eval({
+                x: test_images[i*test_batch_size:(i+1)*test_batch_size],
+                y: test_labels[i*test_batch_size:(i+1)*test_batch_size],
+                keep_probs: 1.0})
+            predicted_labels = np.append(predicted_labels, new_labels)
+
+        predicted_labels = predicted_labels.astype(int)
+        predict_classes = tf.equal(predicted_labels, tf.argmax(y,1))
+
+        all_accuracy = tf.reduce_mean(tf.cast(predict_classes, "float"))
+        print("Epoch:", '%04d' % (epoch+1),
+            "cost=", "{:.9f}".format(avg_cost),
+            "Accuracy:", all_accuracy.eval({y: test_labels})
+        )
+
+        names = get_labels()
+        labels_classes = np.argwhere(test_labels == 1)
+        for j in range(classes):
+            chosen = np.argwhere(labels_classes[:,1] == j)
+            chosen = chosen.reshape(chosen.shape[0])
+            class_labels = test_labels[chosen]
+            predict_classes = tf.equal(predicted_labels[chosen], tf.argmax(y,1))
+            class_acc = tf.reduce_mean(tf.cast(predict_classes, "float"))
+            accuracy = np.average(class_acc.eval({
+                y: class_labels
+            }))
+            print(names[j], " "*(10-len(names[j])), "-", accuracy)
 
 print("Optimization Finished!")
