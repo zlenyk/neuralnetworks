@@ -88,27 +88,9 @@ def crop_images(images):
 def crop_centrally(images):
     return crop(images, 4, 4)
 
-#mnist = input_data.read_data_sets("MNIST_data/", one_hot=True)
-(train_images, train_labels) = get_cifar_data('cifar/data_batch_1')
-for i in range(2,6):
-    train_pref = 'cifar/data_batch_'
-    new_set = get_cifar_data(train_pref+str(i))
-    (new_images,new_labels) = new_set
-    train_images = np.concatenate((train_images, new_images))
-    train_labels = np.concatenate((train_labels, new_labels))
-test_set = get_cifar_data('cifar/test_batch')
-
-
-learning_rate = 0.001
-display_step = 1
-batch_size = 32
-num_epochs = 100
-input_size = 3072
-classes = 10
-
-x = tf.placeholder(tf.float32, [None, 24,24,3])
-y = tf.placeholder(tf.float32, [None, classes])
-keep_probs = tf.placeholder(tf.float32)
+def count_accuracy(predicted_labels, true_labels):
+    is_equal = tf.equal(predicted_labels, tf.argmax(y,1))
+    return tf.reduce_mean(tf.cast(is_equal, "float")).eval({y: true_labels})
 
 CONV = 'CONV'
 POOL = 'POOL'
@@ -281,64 +263,117 @@ test_layers = [
     {'name':POOL},
     {'name':FC, 'shape':[10]}
 ]
-layer_model = model(x, build_layers(layers))
 
-cost = tf.reduce_mean(
-    tf.nn.softmax_cross_entropy_with_logits(logits=layer_model, labels=y))
+(train_images, train_labels) = get_cifar_data('cifar/data_batch_1')
+for i in range(2,6):
+    train_pref = 'cifar/data_batch_'
+    new_set = get_cifar_data(train_pref+str(i))
+    (new_images,new_labels) = new_set
+    train_images = np.concatenate((train_images, new_images))
+    train_labels = np.concatenate((train_labels, new_labels))
+test_set = get_cifar_data('cifar/test_batch')
 
-optimizer = tf.train.AdamOptimizer(learning_rate).minimize(cost)
+#train_images = train_images[:1000]
+#train_labels = train_labels[:1000]
+learning_rate = 0.001
+display_step = 1
+batch_size = 32
+num_epochs = 3
+input_size = 3072
+classes = 10
 
+x = tf.placeholder(tf.float32, [None, 24,24,3])
+y = tf.placeholder(tf.float32, [None, classes])
+keep_probs = tf.placeholder(tf.float32)
+
+models_probs = []
+models_labels = []
 sess = tf.InteractiveSession()
-tf.global_variables_initializer().run()
 
-for epoch in range(num_epochs):
-    avg_cost = 0.
-    total_batch = int(len(train_images)/batch_size)
-    shuffle_in_unison(train_images, train_labels)
-    for i in tqdm(range(total_batch)):
-        batch_images = train_images[i*batch_size:(i+1)*batch_size]
-        batch_images = crop_images(batch_images)
-        batch_labels = train_labels[i*batch_size:(i+1)*batch_size]
-        _, c = sess.run([optimizer, cost], feed_dict={x: batch_images,
-                                                      y: batch_labels,
-                                                      keep_probs: 1.0})
-        # Compute average loss
-        avg_cost += c / total_batch
+names = get_labels()
+labels_classes = np.argwhere(test_set[1] == 1)
+classes_indices = []
+for i in range(classes):
+    class_indices = np.argwhere(labels_classes[:,1] == i).ravel()
+    classes_indices.append(class_indices)
+classes_indices = np.asarray(classes_indices)
 
-    if epoch % display_step == 0:
-        test_batch_size = 100
-        test_images, test_labels = test_set
-        test_images = crop_centrally(test_images)
+for k in range(3):
+    layer_model = model(x, build_layers(layers))
+    cost = tf.reduce_mean(
+        tf.nn.softmax_cross_entropy_with_logits(logits=layer_model, labels=y))
 
-        evaluate_model = tf.argmax(layer_model, 1)
-        predicted_labels = []
-        for i in range(len(test_images)//test_batch_size):
-            new_labels = evaluate_model.eval({
-                x: test_images[i*test_batch_size:(i+1)*test_batch_size],
-                y: test_labels[i*test_batch_size:(i+1)*test_batch_size],
-                keep_probs: 1.0})
-            predicted_labels = np.append(predicted_labels, new_labels)
+    optimizer = tf.train.AdamOptimizer(learning_rate).minimize(cost)
+    tf.global_variables_initializer().run()
 
-        predicted_labels = predicted_labels.astype(int)
-        predict_classes = tf.equal(predicted_labels, tf.argmax(y,1))
+    for epoch in range(num_epochs):
+        avg_cost = 0.
+        total_batch = int(len(train_images)/batch_size)
+        shuffle_in_unison(train_images, train_labels)
+        for i in tqdm(range(total_batch)):
+            batch_images = train_images[i*batch_size:(i+1)*batch_size]
+            batch_images = crop_images(batch_images)
+            batch_labels = train_labels[i*batch_size:(i+1)*batch_size]
+            _, c = sess.run([optimizer, cost], feed_dict={x: batch_images,
+                                                          y: batch_labels,
+                                                          keep_probs: 1.0})
+            # Compute average loss
+            avg_cost += c / total_batch
 
-        all_accuracy = tf.reduce_mean(tf.cast(predict_classes, "float"))
-        print("Epoch:", '%04d' % (epoch+1),
-            "cost=", "{:.9f}".format(avg_cost),
-            "Accuracy:", all_accuracy.eval({y: test_labels})
-        )
+        if epoch % display_step == 0:
+            (test_images, test_labels) = test_set
+            test_batch_size = 100
+            test_images = crop_centrally(test_images)
 
-        names = get_labels()
-        labels_classes = np.argwhere(test_labels == 1)
-        for j in range(classes):
-            chosen = np.argwhere(labels_classes[:,1] == j)
-            chosen = chosen.reshape(chosen.shape[0])
-            class_labels = test_labels[chosen]
-            predict_classes = tf.equal(predicted_labels[chosen], tf.argmax(y,1))
-            class_acc = tf.reduce_mean(tf.cast(predict_classes, "float"))
-            accuracy = np.average(class_acc.eval({
-                y: class_labels
-            }))
-            print(names[j], " "*(10-len(names[j])), "-", accuracy)
+            evaluate_model = tf.argmax(layer_model, 1)
+            predicted_labels = []
+            for i in range(len(test_images)//test_batch_size):
+                new_labels = evaluate_model.eval({
+                    x: test_images[i*test_batch_size:(i+1)*test_batch_size],
+                    y: test_labels[i*test_batch_size:(i+1)*test_batch_size],
+                    keep_probs: 1.0})
+                predicted_labels = np.append(predicted_labels, new_labels)
+            predicted_labels = predicted_labels.astype(int)
+            print("Model:", k, "Epoch:", '%04d' % (epoch+1),
+                "cost=", "{:.9f}".format(avg_cost),
+                "Accuracy:", count_accuracy(predicted_labels, test_labels))
+
+            for j in range(classes):
+                print(names[j], " "*(10-len(names[j])), "-",\
+                    count_accuracy(
+                        predicted_labels[classes_indices[j]],
+                        test_labels[classes_indices[j]]))
+
+    softmax = tf.nn.softmax(logits=layer_model)
+    evaluate_probs = tf.reduce_max(softmax, axis=1)
+    evaluate_labels = tf.argmax(softmax, axis=1)
+    predicted_probs = []
+    predicted_labels = []
+    for i in range(len(test_images)//test_batch_size):
+        new_probs = evaluate_probs.eval({
+            x: test_images[i*test_batch_size:(i+1)*test_batch_size],
+            keep_probs: 1.0
+        })
+        new_labels = evaluate_labels.eval({
+            x: test_images[i*test_batch_size:(i+1)*test_batch_size],
+            keep_probs: 1.0})
+        predicted_probs = np.append(predicted_probs, new_probs)
+        predicted_labels = np.append(predicted_labels, new_labels)
+
+    models_probs.append(predicted_probs)
+    models_labels.append(predicted_labels)
+
+models_probs = np.asarray(models_probs)
+models_labels = np.asarray(models_labels)
+
+best_label = tf.argmax(models_probs, axis=0).eval()
+predicted_labels = models_labels[best_label, np.arange(len(best_label))].astype(int)
+
+print("Joined accuracy:", count_accuracy(predicted_labels, test_labels))
+for j in range(classes):
+    print(names[j], " "*(10-len(names[j])), "-",\
+        count_accuracy(
+            predicted_labels[classes_indices[j]],
+            test_labels[classes_indices[j]]))
 
 print("Optimization Finished!")
