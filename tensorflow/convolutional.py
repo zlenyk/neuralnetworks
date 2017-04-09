@@ -278,7 +278,7 @@ test_set = get_cifar_data('cifar/test_batch')
 learning_rate = 0.001
 display_step = 1
 batch_size = 32
-num_epochs = 3
+num_epochs = 10
 input_size = 3072
 classes = 10
 
@@ -286,7 +286,7 @@ x = tf.placeholder(tf.float32, [None, 24,24,3])
 y = tf.placeholder(tf.float32, [None, classes])
 keep_probs = tf.placeholder(tf.float32)
 
-models_probs = []
+models_probs = np.empty((0,len(test_set[0]),classes))
 models_labels = []
 sess = tf.InteractiveSession()
 
@@ -345,30 +345,18 @@ for k in range(3):
                         test_labels[classes_indices[j]]))
 
     softmax = tf.nn.softmax(logits=layer_model)
-    evaluate_probs = tf.reduce_max(softmax, axis=1)
-    evaluate_labels = tf.argmax(softmax, axis=1)
-    predicted_probs = []
-    predicted_labels = []
+    model_probs = np.empty((0,10))
     for i in range(len(test_images)//test_batch_size):
-        new_probs = evaluate_probs.eval({
+        probs = softmax.eval({
             x: test_images[i*test_batch_size:(i+1)*test_batch_size],
             keep_probs: 1.0
         })
-        new_labels = evaluate_labels.eval({
-            x: test_images[i*test_batch_size:(i+1)*test_batch_size],
-            keep_probs: 1.0})
-        predicted_probs = np.append(predicted_probs, new_probs)
-        predicted_labels = np.append(predicted_labels, new_labels)
+        model_probs = np.concatenate((model_probs,probs))
+    model_probs = np.asarray(model_probs)
+    models_probs = np.append(models_probs, np.expand_dims(model_probs,axis=0), axis=0)
 
-    models_probs.append(predicted_probs)
-    models_labels.append(predicted_labels)
-
-models_probs = np.asarray(models_probs)
-models_labels = np.asarray(models_labels)
-
-best_label = tf.argmax(models_probs, axis=0).eval()
-predicted_labels = models_labels[best_label, np.arange(len(best_label))].astype(int)
-
+worst_probs = np.amin(models_probs, axis=0)
+predicted_labels = tf.argmax(worst_probs, axis=1).eval()
 print("Joined accuracy:", count_accuracy(predicted_labels, test_labels))
 for j in range(classes):
     print(names[j], " "*(10-len(names[j])), "-",\
