@@ -57,12 +57,12 @@ def scale_and_rotate_image(image, image_shape, angle_range=15.0, scale_range=0.1
                            (tf_shift + tf_scale + tf_rotate + tf_shift_inv).inverse).ravel()
     return image
 
-def weight_variable(shape):
-    initial = tf.truncated_normal(shape, stddev=0.1)
+def weight_variable(shape, stddev=0.1):
+    initial = tf.truncated_normal(shape, stddev=stddev)
     return tf.Variable(initial)
 
 def bias_variable(shape):
-    initial = tf.constant(0.1, shape=shape)
+    initial = tf.constant(0.3, shape=shape)
     return tf.Variable(initial)
 
 def conv2d(x, W):
@@ -72,6 +72,7 @@ def max_pool_2x2(x):
     return tf.nn.max_pool(x, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='SAME')
 
 def normalize_batch(X, gamma, beta):
+    #return tf.nn.lrn(X, 4, bias=1.0, alpha=0.001 / 9.0, beta=0.75)
     mean, var = tf.nn.moments(X, axes=[0,1,2], keep_dims=False)
     return tf.nn.batch_normalization(X, mean, var, beta, gamma, 1e-5)
 
@@ -108,7 +109,9 @@ def build_layers(layers):
         layer_dict = {}
         layer_dict['name'] = layer['name']
         if layer['name'] == CONV:
-            layer_dict['W'] = weight_variable([layer['shape'][0], layer['shape'][1], current_shape[0], layer['shape'][2]])
+            layer_dict['W'] = weight_variable(  shape = [layer['shape'][0], layer['shape'][1], current_shape[0], layer['shape'][2]],
+                                                stddev=5e-2,
+                                                )
             layer_dict['b'] = bias_variable([layer['shape'][2]])
             current_shape[0] = layer['shape'][2]
         elif layer['name'] == FC:
@@ -122,7 +125,7 @@ def build_layers(layers):
         elif layer['name'] == NORM:
             layer_dict['mean'] = tf.Variable(tf.random_normal([current_shape[0]]))
             layer_dict['var'] = tf.Variable(tf.random_normal([current_shape[0]]))+1
-        # in case of dropout or relu change nothing
+        # in case of dropout change nothing
         model_layers.append(layer_dict)
     return model_layers
 
@@ -275,12 +278,17 @@ test_set = get_cifar_data('cifar/test_batch')
 
 #train_images = train_images[:1000]
 #train_labels = train_labels[:1000]
-learning_rate = 0.001
 display_step = 1
 batch_size = 32
-num_epochs = 10
+num_epochs = 20
 input_size = 3072
 classes = 10
+log_file = open('results.txt', 'w')
+
+global_step = tf.Variable(0, trainable=False)
+starter_learning_rate = 0.1
+learning_rate = tf.train.exponential_decay(starter_learning_rate, global_step,
+                                           1000, 0.98, staircase=True)
 
 x = tf.placeholder(tf.float32, [None, 24,24,3])
 y = tf.placeholder(tf.float32, [None, classes])
@@ -298,13 +306,18 @@ for i in range(classes):
     classes_indices.append(class_indices)
 classes_indices = np.asarray(classes_indices)
 
-for k in range(3):
+for k in range(5):
     layer_model = model(x, build_layers(layers))
     cost = tf.reduce_mean(
-        tf.nn.softmax_cross_entropy_with_logits(logits=layer_model, labels=y))
+            tf.nn.softmax_cross_entropy_with_logits(logits=layer_model, labels=y))
 
-    optimizer = tf.train.AdamOptimizer(learning_rate).minimize(cost)
+    optimizer = tf.train.AdamOptimizer(0.001).minimize(cost)
+    ema = tf.train.ExponentialMovingAverage(decay=0.995)
+    var_avg = ema.apply(tf.trainable_variables())
+
     tf.global_variables_initializer().run()
+    with tf.control_dependencies([optimizer]):
+        training_op = tf.group(var_avg)
 
     for epoch in range(num_epochs):
         avg_cost = 0.
@@ -314,7 +327,7 @@ for k in range(3):
             batch_images = train_images[i*batch_size:(i+1)*batch_size]
             batch_images = crop_images(batch_images)
             batch_labels = train_labels[i*batch_size:(i+1)*batch_size]
-            _, c = sess.run([optimizer, cost], feed_dict={x: batch_images,
+            _, c = sess.run([training_op, cost], feed_dict={x: batch_images,
                                                           y: batch_labels,
                                                           keep_probs: 1.0})
             # Compute average loss
@@ -365,3 +378,4 @@ for j in range(classes):
             test_labels[classes_indices[j]]))
 
 print("Optimization Finished!")
+log_file.close()
