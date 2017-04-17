@@ -14,13 +14,17 @@ def bias_variable(shape):
 def conv2d(x, W):
     return tf.nn.conv2d(x, W, strides=[1, 1, 1, 1], padding='SAME')
 
+# ksize = 3,3 for overlapping pooling
 def max_pool_2x2(x):
     return tf.nn.max_pool(x, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='SAME')
 
+def local_normalize(X):
+    return tf.nn.lrn(X, 4, bias=1.0, alpha=0.001 / 9.0, beta=0.75)
+
+#axes=[0,1,2]
 def normalize_batch(X, gamma, beta, axes=[0,1,2]):
-    #return tf.nn.lrn(X, 4, bias=1.0, alpha=0.001 / 9.0, beta=0.75)
     mean, var = tf.nn.moments(X, axes=axes, keep_dims=False)
-    return tf.nn.batch_normalization(X, mean, var, beta, gamma, 1e-5)
+    return tf.nn.batch_normalization(X, mean=mean, variance=var, offset=beta, scale=gamma, variance_epsilon=1e-5)
 
 def shuffle_in_unison(a, b):
     rng_state = np.random.get_state()
@@ -50,7 +54,7 @@ def build_layers(layers):
                                                 layer['shape'][1],
                                                 current_shape[0],
                                                 layer['shape'][2]],
-                                            stddev=1.0/24.0)
+                                            stddev=1.0/33.0)
             layer_dict['b'] = bias_variable([layer['shape'][2]])
             current_shape[0] = layer['shape'][2]
         elif layer['name'] == FC:
@@ -96,7 +100,6 @@ def model(X, layers):
     return X
 
 layers = [
-    {'name':DROPOUT},
     {'name':NORM},
 
     {'name':CONV, 'shape':[3,3,128]},#32
@@ -195,6 +198,7 @@ layers = [
 
     {'name':NORM},
     {'name':RELU},
+    {'name':DROPOUT},
     {'name':FC, 'shape':[512]},
     {'name':NORM, 'axes':[0]},
     {'name':RELU},
@@ -213,8 +217,7 @@ test_layers = [
     {'name':POOL},
     {'name':FC, 'shape':[10]}
 ]
-ema_name = 'saver/ema.ckpt'
-saver_name = 'saver/saver.ckpt'
+saver_name = 'saver/saver2.ckpt'
 
 x = tf.placeholder(tf.float32, [None, 24,24,3])
 y = tf.placeholder(tf.float32, [None, classes])
@@ -248,9 +251,9 @@ class Model:
 
         self.cost_op = _cost_op(self.layer_model)
         self.optimizer_op = tf.train.AdamOptimizer(learning_rate=0.001).minimize(self.cost_op)
-        ema = tf.train.ExponentialMovingAverage(decay=0.995)
-        var_avg = ema.apply(tf.trainable_variables())
-        self.ema_saver = tf.train.Saver(ema.variables_to_restore())
+        self.ema = tf.train.ExponentialMovingAverage(decay=0.995)
+        var_avg = self.ema.apply(tf.trainable_variables())
+        self.ema_saver = tf.train.Saver(self.ema.variables_to_restore())
         self.saver = tf.train.Saver()
         self.training_op = tf.group(self.optimizer_op, var_avg)
 
@@ -263,29 +266,39 @@ class Model:
         return tf.equal(predicted, tf.argmax(y, 1))
 
     def count_accuracy(self, images, labels, session):
-        images_iter = batch_iterator(images, batch_size=100)
-        labels_iter = batch_iterator(labels, batch_size=100)
+        batch_size=100
+        images_iter = batch_iterator(images, batch_size=batch_size)
+        labels_iter = batch_iterator(labels, batch_size=batch_size)
         eq_sum = 0.
-        #self.ema_saver.restore(session, ema_name)
+        self.ema_saver.restore(session, saver_name)
         while True:
             try:
                 batch_images, _ = next(images_iter)
                 batch_labels, _ = next(labels_iter)
-                batch_images = image_utils.crop_centrally(batch_images)
-                add_equal = tf.reduce_sum(tf.cast(tf.equal(self._predict_op(), tf.argmax(y, 1)), tf.float32)).eval({
-                    x: batch_images,
-                    y: batch_labels,
-                    keep_probs: 1.0
+                crops = [[0,0],[0,8],[8,0],[8,8],[4,4]]
+                outputs = np.zeros((batch_size, 10))
+                for crop in crops:
+                    cropped_images = image_utils.crop(batch_images, crop[0], crop[1])
+                    predictions = self.layer_model.eval({
+                        x: cropped_images,
+                        keep_probs: 1.0
+                    })
+                    outputs = outputs + predictions
+                avg_outputs = outputs / len(crops)
+                add_equal = tf.reduce_sum(tf.cast(
+                    tf.equal(tf.argmax(avg_outputs, axis=1), tf.argmax(y, 1)), tf.float32)).eval({
+                        y: batch_labels,
                 })
                 eq_sum += add_equal
             except StopIteration:
+                self.saver.restore(session, saver_name)
                 return eq_sum / len(labels)
 
     def train(self, images, labels, session):
         batch_size = 32
         total_batch = int(len(images)/batch_size)
         shuffle_in_unison(images, labels)
-        #self.saver.restore(session, saver_name)
+        self.saver.restore(session, saver_name)
         images_iter = batch_iterator(images, batch_size=batch_size)
         labels_iter = batch_iterator(labels, batch_size=batch_size)
         avg_cost = 0.
@@ -297,12 +310,12 @@ class Model:
                 _, c = session.run([self.training_op, self.cost_op], feed_dict={
                     x: batch_images,
                     y: batch_labels,
-                    keep_probs: 1.0
+                    keep_probs: 0.7
                 })
                 avg_cost += c / total_batch
             except StopIteration:
                 pass
-        #self.saver.save(session, saver_name)
+        self.saver.save(session, saver_name)
         print("Cost:", avg_cost)
 
 def get_model(test=False):
