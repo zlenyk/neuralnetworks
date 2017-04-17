@@ -2,6 +2,7 @@ import tensorflow as tf
 import numpy as np
 from tqdm import *
 import image_utils
+import math
 
 def weight_variable(shape, stddev=0.1):
     initial = tf.truncated_normal(shape, stddev=stddev)
@@ -54,7 +55,7 @@ def build_layers(layers):
                                                 layer['shape'][1],
                                                 current_shape[0],
                                                 layer['shape'][2]],
-                                            stddev=1.0/33.0)
+                                            stddev=math.sqrt(2.0/(9.0*current_shape[0])))
             layer_dict['b'] = bias_variable([layer['shape'][2]])
             current_shape[0] = layer['shape'][2]
         elif layer['name'] == FC:
