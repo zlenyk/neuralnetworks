@@ -1,0 +1,2 @@
+model_checkpoint_path: "ema.ckpt"
+all_model_checkpoint_paths: "ema.ckpt"
